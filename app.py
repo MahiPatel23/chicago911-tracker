@@ -4,6 +4,17 @@ from utils.analysis import compute_neighborhood_stats, comp_income_corr
 import plotly.express as px
 import folium
 from streamlit_folium import st_folium
+from sqlalchemy import create_engine
+import pandas as pd
+
+
+# ── Database connection ─────────────────────────────────────────
+@st.cache_resource
+def get_connection():
+    url = st.secrets["connections"]["postgres"]["url"]
+    return create_engine(url)
+
+engine = get_connection()
 
 st.set_page_config(page_title="Chicago 911 Tracker", page_icon="🚨", layout="wide")
 
@@ -45,7 +56,14 @@ st.markdown("---")
 
 # ── Chart 1: Response by neighborhood ────────────────────────────
 st.subheader("Response time by neighborhood")
-stats = compute_neighborhood_stats(df, top_n)
+query = f"""
+    SELECT neighborhood, ROUND(AVG(response_min)::numeric, 2) AS median_response_min
+    FROM incidents_911
+    GROUP BY neighborhood
+    ORDER BY median_response_min DESC
+    LIMIT {top_n};
+"""
+stats = pd.read_sql(query, engine)
 fig = px.bar(
     stats,
     x="median_response_min",
@@ -61,6 +79,26 @@ st.plotly_chart(fig, use_container_width=True)
 
 # ── Chart 2: Income correlation ───────────────────────────────────
 st.subheader("Does income predict response time?")
+# ── Chart: Peak incident months (SQL) ─────────────────────────────
+st.subheader("Peak incident months")
+peak_query = """
+    SELECT month, COUNT(*) AS incident_count
+    FROM incidents_911
+    GROUP BY month
+    ORDER BY month;
+"""
+peak_df = pd.read_sql(peak_query, engine)
+
+fig_peak = px.bar(
+    peak_df,
+    x="month",
+    y="incident_count",
+    labels={"month": "Month", "incident_count": "Number of incidents"},
+)
+fig_peak.update_layout(plot_bgcolor="white", xaxis=dict(tickmode="linear", tick0=1, dtick=1))
+st.plotly_chart(fig_peak, use_container_width=True)
+
+st.markdown("---")
 corr_df = comp_income_corr(df, census)
 fig2 = px.scatter(
     corr_df,
